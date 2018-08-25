@@ -1,5 +1,5 @@
 # lametric-tools
- adds some features to lametrix devices.
+... adds some features to LaMetric Time devices.
 
 
 # Features
@@ -19,11 +19,11 @@ Upload the files to `/mnt/user/custom/notifications`
 
 Afterwards send a MQTT message to
 
-`home/lametric/playsound` with the filename (without .mp3) as message.
+`home/lametric/playsound` with the filename (without `.mp3`) as message.
 
 ## Retrieve light sensor data
 
-Subscribe to topic `home/lametric/brightness` and you will receive the current light sensor messurement.
+Subscribe to topic `home/lametric/brightness` and you will receive the current light sensor measurement.
 
 # Starting
 
