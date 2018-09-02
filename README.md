@@ -8,7 +8,7 @@
 You can use the device to output text-to-speach sounds.
 Simply send a MQTT message to
 
-`home/lametric/playtss` with some text as message.
+`home/lametric/playtts` with some text as message.
 
 This uses Google TTS/[gTTS](https://github.com/pndurette/gTTS) in the background. The resulting mp3 files will be cached in `/mnt/user/temp/tts/`.
 
