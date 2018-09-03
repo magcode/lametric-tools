@@ -11,6 +11,14 @@ Simply send a MQTT message to
 
 This uses Google TTS/[gTTS](https://github.com/pndurette/gTTS) in the background. The resulting mp3 files will be cached in `/mnt/user/temp/tts/`.
 
+The file `tts.conf` allows you to configure a web proxy and the TTS language:
+
+```
+HTTP_PROXY="http://proxy:3128"
+HTTPS_PROXY="http://proxy:3128"
+lang=en
+```
+
 ## Play own sounds
 
 You can use the device to play some own mp3 files.
