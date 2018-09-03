@@ -21,6 +21,26 @@ Afterwards send a MQTT message to
 
 `home/lametric/playsound` with the filename (without `.mp3`) as message.
 
+## Indicator Apps
+
+You can send data to your indicator apps. Use the usual JSON format and send it to
+
+`home/lametric/widgetupdate/<yourappid>`
+
+example:
+
+`home/lametric/widgetupdate/com.lametric.bbb5ab4b3445b52f53865e49938a9b01`
+
+Make sure the JSON data contains no line breaks!
+
+## Notifications
+
+You can trigger notifications. Use the usual JSON format and send it to
+
+`home/lametric/notification`
+
+Make sure the JSON data contains no line breaks!
+
 ## Retrieve light sensor data
 
 Subscribe to topic `home/lametric/brightness` and you will receive the current light sensor measurement.
