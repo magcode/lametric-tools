@@ -1,7 +1,6 @@
 # lametric-tools
 ... adds some features to LaMetric Time devices.
 
-
 # Features
 ## TTS
 
@@ -48,3 +47,9 @@ Subscribe to topic `home/lametric/brightness` and you will receive the current l
 # Starting
 
 Use `/mnt/user/custom/mqtt/mqrun.sh` to start the MQTT features.
+
+# Does LaMetric need internet access?
+
+No. This works fine in case you only use the LaMetric as local display for clock, "indicator" apps and notifications. The initial setup must be done with internet access. For timesyncing use your router and redirect `time1.google.com` to your local NTP server.
+
+Of course, if you use IFTTT, Radio, Weather, etc you'll need to open internet access (potentially with sophisticated rules, e.g. allow only a particular radio stream URL)
