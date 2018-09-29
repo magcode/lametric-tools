@@ -58,11 +58,13 @@ class Token:
         response = requests.get("https://translate.google.com/")
         line = response.text.split('\n')[-1]
 
-        tkk_expr = re.search(".*?(TKK=.*?;)W.*?", line).group(1)
-        a = re.search("a\\\\x3d(-?\d+);", tkk_expr).group(1)
-        b = re.search("b\\\\x3d(-?\d+);", tkk_expr).group(1)
+        #tkk_expr = re.search(".*?(TKK=.*?;)W.*?", line).group(1)
+        #a = re.search("a\\\\x3d(-?\d+);", tkk_expr).group(1)
+        #b = re.search("b\\\\x3d(-?\d+);", tkk_expr).group(1)
 
-        result = str(hours) + "." + str(int(a) + int(b))
+        #result = str(hours) + "." + str(int(a) + int(b))
+        
+        result = re.search("TKK='(.+?)';", line).group(1)
         self.token_key = result
         return result
 

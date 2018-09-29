@@ -6,6 +6,7 @@ from gtts.lang import tts_langs
 from gtts_token import gtts_token
 from six.moves import urllib
 import urllib3
+urllib3.disable_warnings()
 import requests
 import logging
 
