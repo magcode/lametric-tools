@@ -14,22 +14,21 @@ Some terminology:
 import locale
 import logging
 import os
+import sys
 
-from pip._vendor import six
 from pip._vendor.six.moves import configparser
 
 from pip._internal.exceptions import (
-    ConfigurationError, ConfigurationFileCouldNotBeLoaded,
+    ConfigurationError,
+    ConfigurationFileCouldNotBeLoaded,
 )
-from pip._internal.locations import (
-    legacy_config_file, new_config_file, running_under_virtualenv,
-    site_config_files, venv_config_file,
-)
+from pip._internal.utils import appdirs
+from pip._internal.utils.compat import WINDOWS, expanduser
 from pip._internal.utils.misc import ensure_dir, enum
 from pip._internal.utils.typing import MYPY_CHECK_RUNNING
 
 if MYPY_CHECK_RUNNING:
-    from typing import (  # noqa: F401
+    from typing import (
         Any, Dict, Iterable, List, NewType, Optional, Tuple
     )
 
@@ -52,6 +51,12 @@ def _normalize_name(name):
 
 def _disassemble_key(name):
     # type: (str) -> List[str]
+    if "." not in name:
+        error_message = (
+            "Key does not contain dot separated section and key. "
+            "Perhaps you wanted to use 'global.{}' instead?"
+        ).format(name)
+        raise ConfigurationError(error_message)
     return name.split(".", 1)
 
 
@@ -59,10 +64,36 @@ def _disassemble_key(name):
 kinds = enum(
     USER="user",        # User Specific
     GLOBAL="global",    # System Wide
-    VENV="venv",        # Virtual Environment Specific
+    SITE="site",        # [Virtual] Environment Specific
     ENV="env",          # from PIP_CONFIG_FILE
     ENV_VAR="env-var",  # from Environment Variables
 )
+
+
+CONFIG_BASENAME = 'pip.ini' if WINDOWS else 'pip.conf'
+
+
+def get_configuration_files():
+    # type: () -> Dict[Kind, List[str]]
+    global_config_files = [
+        os.path.join(path, CONFIG_BASENAME)
+        for path in appdirs.site_config_dirs('pip')
+    ]
+
+    site_config_file = os.path.join(sys.prefix, CONFIG_BASENAME)
+    legacy_config_file = os.path.join(
+        expanduser('~'),
+        'pip' if WINDOWS else '.pip',
+        CONFIG_BASENAME,
+    )
+    new_config_file = os.path.join(
+        appdirs.user_config_dir("pip"), CONFIG_BASENAME
+    )
+    return {
+        kinds.GLOBAL: global_config_files,
+        kinds.SITE: [site_config_file],
+        kinds.USER: [legacy_config_file, new_config_file],
+    }
 
 
 class Configuration(object):
@@ -80,22 +111,22 @@ class Configuration(object):
     """
 
     def __init__(self, isolated, load_only=None):
-        # type: (bool, Kind) -> None
+        # type: (bool, Optional[Kind]) -> None
         super(Configuration, self).__init__()
 
-        _valid_load_only = [kinds.USER, kinds.GLOBAL, kinds.VENV, None]
+        _valid_load_only = [kinds.USER, kinds.GLOBAL, kinds.SITE, None]
         if load_only not in _valid_load_only:
             raise ConfigurationError(
                 "Got invalid value for load_only - should be one of {}".format(
                     ", ".join(map(repr, _valid_load_only[:-1]))
                 )
             )
-        self.isolated = isolated  # type: bool
-        self.load_only = load_only  # type: Optional[Kind]
+        self.isolated = isolated
+        self.load_only = load_only
 
         # The order here determines the override order.
         self._override_order = [
-            kinds.GLOBAL, kinds.USER, kinds.VENV, kinds.ENV, kinds.ENV_VAR
+            kinds.GLOBAL, kinds.USER, kinds.SITE, kinds.ENV, kinds.ENV_VAR
         ]
 
         self._ignore_env_names = ["version", "help"]
@@ -151,6 +182,7 @@ class Configuration(object):
         """
         self._ensure_have_load_only()
 
+        assert self.load_only
         fname, parser = self._get_parser_to_modify()
 
         if parser is not None:
@@ -166,10 +198,10 @@ class Configuration(object):
 
     def unset_value(self, key):
         # type: (str) -> None
-        """Unset a value in the configuration.
-        """
+        """Unset a value in the configuration."""
         self._ensure_have_load_only()
 
+        assert self.load_only
         if key not in self._config[self.load_only]:
             raise ConfigurationError("No such key - {}".format(key))
 
@@ -177,35 +209,23 @@ class Configuration(object):
 
         if parser is not None:
             section, name = _disassemble_key(key)
-
-            # Remove the key in the parser
-            modified_something = False
-            if parser.has_section(section):
-                # Returns whether the option was removed or not
-                modified_something = parser.remove_option(section, name)
-
-            if modified_something:
-                # name removed from parser, section may now be empty
-                section_iter = iter(parser.items(section))
-                try:
-                    val = six.next(section_iter)
-                except StopIteration:
-                    val = None
-
-                if val is None:
-                    parser.remove_section(section)
-
-                self._mark_as_modified(fname, parser)
-            else:
+            if not (parser.has_section(section)
+                    and parser.remove_option(section, name)):
+                # The option was not removed.
                 raise ConfigurationError(
                     "Fatal Internal error [id=1]. Please report as a bug."
                 )
+
+            # The section may be empty after the option was removed.
+            if not parser.items(section):
+                parser.remove_section(section)
+            self._mark_as_modified(fname, parser)
 
         del self._config[self.load_only][key]
 
     def save(self):
         # type: () -> None
-        """Save the currentin-memory state.
+        """Save the current in-memory state.
         """
         self._ensure_have_load_only()
 
@@ -216,7 +236,7 @@ class Configuration(object):
             ensure_dir(os.path.dirname(fname))
 
             with open(fname, "w") as f:
-                parser.write(f)  # type: ignore
+                parser.write(f)
 
     #
     # Private routines
@@ -246,7 +266,7 @@ class Configuration(object):
         # type: () -> None
         """Loads configuration from configuration files
         """
-        config_files = dict(self._iter_config_files())
+        config_files = dict(self.iter_config_files())
         if config_files[kinds.ENV][0:1] == [os.devnull]:
             logger.debug(
                 "Skipping loading configuration files due to "
@@ -308,7 +328,7 @@ class Configuration(object):
         """Loads configuration from environment variables
         """
         self._config[kinds.ENV_VAR].update(
-            self._normalized_keys(":env:", self._get_environ_vars())
+            self._normalized_keys(":env:", self.get_environ_vars())
         )
 
     def _normalized_keys(self, section, items):
@@ -324,7 +344,7 @@ class Configuration(object):
             normalized[key] = val
         return normalized
 
-    def _get_environ_vars(self):
+    def get_environ_vars(self):
         # type: () -> Iterable[Tuple[str, str]]
         """Returns a generator with all environmental vars with prefix PIP_"""
         for key, val in os.environ.items():
@@ -336,7 +356,7 @@ class Configuration(object):
                 yield key[4:].lower(), val
 
     # XXX: This is patched in the tests.
-    def _iter_config_files(self):
+    def iter_config_files(self):
         # type: () -> Iterable[Tuple[Kind, List[str]]]
         """Yields variant and configuration files associated with it.
 
@@ -351,8 +371,10 @@ class Configuration(object):
         else:
             yield kinds.ENV, []
 
+        config_files = get_configuration_files()
+
         # at the base we have any global configuration
-        yield kinds.GLOBAL, list(site_config_files)
+        yield kinds.GLOBAL, config_files[kinds.GLOBAL]
 
         # per-user configuration next
         should_load_user_config = not self.isolated and not (
@@ -360,15 +382,20 @@ class Configuration(object):
         )
         if should_load_user_config:
             # The legacy config file is overridden by the new config file
-            yield kinds.USER, [legacy_config_file, new_config_file]
+            yield kinds.USER, config_files[kinds.USER]
 
         # finally virtualenv configuration first trumping others
-        if running_under_virtualenv():
-            yield kinds.VENV, [venv_config_file]
+        yield kinds.SITE, config_files[kinds.SITE]
+
+    def get_values_in_config(self, variant):
+        # type: (Kind) -> Dict[str, Any]
+        """Get values present in a config file"""
+        return self._config[variant]
 
     def _get_parser_to_modify(self):
         # type: () -> Tuple[str, RawConfigParser]
         # Determine which parser to modify
+        assert self.load_only
         parsers = self._parsers[self.load_only]
         if not parsers:
             # This should not happen if everything works correctly.
@@ -385,3 +412,7 @@ class Configuration(object):
         file_parser_tuple = (fname, parser)
         if file_parser_tuple not in self._modified_parsers:
             self._modified_parsers.append(file_parser_tuple)
+
+    def __repr__(self):
+        # type: () -> str
+        return "{}({!r})".format(self.__class__.__name__, self._dictionary)

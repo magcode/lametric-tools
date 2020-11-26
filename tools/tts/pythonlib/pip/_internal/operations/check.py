@@ -1,18 +1,24 @@
 """Validation of dependencies of packages
 """
 
+import logging
 from collections import namedtuple
 
 from pip._vendor.packaging.utils import canonicalize_name
+from pip._vendor.pkg_resources import RequirementParseError
 
-from pip._internal.operations.prepare import make_abstract_dist
+from pip._internal.distributions import (
+    make_distribution_for_install_requirement,
+)
 from pip._internal.utils.misc import get_installed_distributions
 from pip._internal.utils.typing import MYPY_CHECK_RUNNING
 
+logger = logging.getLogger(__name__)
+
 if MYPY_CHECK_RUNNING:
-    from pip._internal.req.req_install import InstallRequirement  # noqa: F401
-    from typing import (  # noqa: F401
-        Any, Callable, Dict, Iterator, Optional, Set, Tuple, List
+    from pip._internal.req.req_install import InstallRequirement
+    from typing import (
+        Any, Callable, Dict, Optional, Set, Tuple, List
     )
 
     # Shorthands
@@ -23,12 +29,13 @@ if MYPY_CHECK_RUNNING:
     MissingDict = Dict[str, List[Missing]]
     ConflictingDict = Dict[str, List[Conflicting]]
     CheckResult = Tuple[MissingDict, ConflictingDict]
+    ConflictDetails = Tuple[PackageSet, CheckResult]
 
 PackageDetails = namedtuple('PackageDetails', ['version', 'requires'])
 
 
 def create_package_set_from_installed(**kwargs):
-    # type: (**Any) -> PackageSet
+    # type: (**Any) -> Tuple[PackageSet, bool]
     """Converts a list of distributions into a PackageSet.
     """
     # Default to using all packages installed on the system
@@ -36,10 +43,16 @@ def create_package_set_from_installed(**kwargs):
         kwargs = {"local_only": False, "skip": ()}
 
     package_set = {}
+    problems = False
     for dist in get_installed_distributions(**kwargs):
         name = canonicalize_name(dist.project_name)
-        package_set[name] = PackageDetails(dist.version, dist.requires())
-    return package_set
+        try:
+            package_set[name] = PackageDetails(dist.version, dist.requires())
+        except (OSError, RequirementParseError) as e:
+            # Don't crash on unreadable or broken metadata
+            logger.warning("Error parsing requirements for %s: %s", name, e)
+            problems = True
+    return package_set, problems
 
 
 def check_package_set(package_set, should_ignore=None):
@@ -49,19 +62,16 @@ def check_package_set(package_set, should_ignore=None):
     If should_ignore is passed, it should be a callable that takes a
     package name and returns a boolean.
     """
-    if should_ignore is None:
-        def should_ignore(name):
-            return False
 
-    missing = dict()
-    conflicting = dict()
+    missing = {}
+    conflicting = {}
 
     for package_name in package_set:
         # Info about dependencies of package_name
         missing_deps = set()  # type: Set[Missing]
         conflicting_deps = set()  # type: Set[Conflicting]
 
-        if should_ignore(package_name):
+        if should_ignore and should_ignore(package_name):
             continue
 
         for req in package_set[package_name].requires:
@@ -90,12 +100,12 @@ def check_package_set(package_set, should_ignore=None):
 
 
 def check_install_conflicts(to_install):
-    # type: (List[InstallRequirement]) -> Tuple[PackageSet, CheckResult]
+    # type: (List[InstallRequirement]) -> ConflictDetails
     """For checking if the dependency graph would be consistent after \
     installing given requirements
     """
     # Start from the current state
-    package_set = create_package_set_from_installed()
+    package_set, _ = create_package_set_from_installed()
     # Install packages
     would_be_installed = _simulate_installation_of(to_install, package_set)
 
@@ -110,9 +120,6 @@ def check_install_conflicts(to_install):
     )
 
 
-# NOTE from @pradyunsg
-# This required a minor update in dependency link handling logic over at
-# operations.prepare.IsSDist.dist() to get it working
 def _simulate_installation_of(to_install, package_set):
     # type: (List[InstallRequirement], PackageSet) -> Set[str]
     """Computes the version of packages after installing to_install.
@@ -123,7 +130,10 @@ def _simulate_installation_of(to_install, package_set):
 
     # Modify it as installing requirement_set would (assuming no errors)
     for inst_req in to_install:
-        dist = make_abstract_dist(inst_req).dist(finder=None)
+        abstract_dist = make_distribution_for_install_requirement(inst_req)
+        dist = abstract_dist.get_pkg_resources_distribution()
+
+        assert dist is not None
         name = canonicalize_name(dist.key)
         package_set[name] = PackageDetails(dist.version, dist.requires())
 
