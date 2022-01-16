@@ -2,6 +2,9 @@ password=`cat /lametric/data/configs/lighttpd/users.txt | grep user | cut -d ":"
 token=`echo -n $password | $ROOT_PATH/base64 -w0`
 header="X-Access-Token: $token"
 
+url="https://localhost:4343/api/v2/device/notifications"
+echo '{"priority":"critical","icon_type":"info","model":{"cycles":1,"sound":{"category":"notifications","id":"positive1"},"frames":[{"icon":"a8699","text":"MQTT init"}]}}' | $ROOT_PATH/curl -s -d @- -u "user:$password" --insecure "$url" 2>/dev/null
+
 $BIN_PATH/mosquitto_sub -I $clientID -h $mqtthost $auth -v -t $topic/playtts -t $topic/notification -t $topic/playsound -t $topic/widgetupdate/# | while read line
 do
     rxtopic=`echo $line| cut -d" " -f1`
